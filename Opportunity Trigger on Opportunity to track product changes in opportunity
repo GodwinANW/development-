@@ -1,0 +1,46 @@
+trigger OpportunityTrigger on Opportunity (after update) {
+    // Collect Opportunity IDs of closed won opportunities
+    Set<Id> closedWonOppIds = new Set<Id>();
+    
+    for (Opportunity opp : Trigger.new) {
+        if (opp.StageName == 'Closed Won' && Trigger.oldMap.get(opp.Id).StageName != 'Closed Won') {
+            closedWonOppIds.add(opp.Id);
+        }
+    }
+
+    if (!closedWonOppIds.isEmpty()) {
+        // Get all OpportunityLineItems for the closed won Opportunities
+        List<OpportunityLineItem> oppLineItems = [
+            SELECT OpportunityId, Quantity, Product2Id
+            FROM OpportunityLineItem
+            WHERE OpportunityId IN :closedWonOppIds
+        ];
+
+        // Map to store productId to quantity sold
+        Map<Id, Integer> productSalesMap = new Map<Id, Integer>();
+        
+        for (OpportunityLineItem lineItem : oppLineItems) {
+            if (lineItem.Product2Id != null) {
+                if (productSalesMap.containsKey(lineItem.Product2Id)) {
+                    productSalesMap.put(lineItem.Product2Id, productSalesMap.get(lineItem.Product2Id) + Integer.valueOf(lineItem.Quantity));
+                } else {
+                    productSalesMap.put(lineItem.Product2Id, Integer.valueOf(lineItem.Quantity));
+                }
+            }
+        }
+
+        // List to hold Products to update
+        List<Product2> productsToUpdate = new List<Product2>();
+        
+        // Get related products and update the No of Products Sold field
+        for (Id productId : productSalesMap.keySet()) {
+            Product2 product = [SELECT Id, No_of_Products_Sold__c FROM Product2 WHERE Id = :productId];
+            product.No_of_Products_Sold__c = (product.No_of_Products_Sold__c != null ? product.No_of_Products_Sold__c : 0) + productSalesMap.get(productId);
+            productsToUpdate.add(product);
+        }
+
+        if (!productsToUpdate.isEmpty()) {
+            update productsToUpdate;
+        }
+    }
+}
